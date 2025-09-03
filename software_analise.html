@@ -5,6 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Diagnóstico Empresarial Inteligente PRO</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        // Fallback para jsPDF se não carregar
+        window.addEventListener('load', function() {
+            if (!window.jspdf) {
+                console.warn('jsPDF não carregou do CDN principal, tentando fallback...');
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js';
+                script.onload = function() {
+                    console.log('jsPDF carregado via fallback');
+                };
+                script.onerror = function() {
+                    console.error('Falha ao carregar jsPDF via fallback');
+                };
+                document.head.appendChild(script);
+            } else {
+                console.log('jsPDF carregado com sucesso');
+            }
+        });
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -332,8 +353,11 @@
                                     </div>
                                     <div>
                                         <label for="user_whatsapp" class="block text-sm font-medium mb-2">WhatsApp (com DDD) *</label>
-                                        <input type="tel" id="user_whatsapp" name="user_whatsapp" required placeholder="Ex: 11999999999" class="w-full px-4 py-3 rounded-lg border focus:outline-none" pattern="[0-9]{10,11}">
-                                        <p class="text-xs text-gray-500 mt-1">Apenas números, sem espaços ou símbolos. Será usado para enviar o relatório.</p>
+                                        <div class="flex">
+                                            <span class="inline-flex items-center px-3 text-sm text-gray-900 bg-gray-200 border border-r-0 border-gray-300 rounded-l-md dark:bg-gray-600 dark:text-gray-400 dark:border-gray-600">+55</span>
+                                            <input type="tel" id="user_whatsapp" name="user_whatsapp" required placeholder="11999999999" class="rounded-none rounded-r-lg bg-gray-50 border text-gray-900 focus:ring-blue-500 focus:border-blue-500 block flex-1 min-w-0 w-full text-sm border-gray-300 p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500" pattern="[0-9]{10,11}">
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-1">Apenas números, sem espaços ou símbolos. O +55 já está incluído para o Brasil.</p>
                                     </div>
                                     <div>
                                         <label for="company_name" class="block text-sm font-medium mb-2">Nome da Empresa *</label>
@@ -771,7 +795,7 @@
         const newAnalysisBtn = document.getElementById('new-analysis');
         if (newAnalysisBtn) newAnalysisBtn.addEventListener('click', handleNewAnalysis);
         const downloadReportBtn = document.getElementById('download-report');
-        if (downloadReportBtn) downloadReportBtn.addEventListener('click', () => showTemporaryMessage('Funcionalidade de download do relatório em PDF será implementada em breve!'));
+        if (downloadReportBtn) downloadReportBtn.addEventListener('click', generatePDFReport);
         const shareReportBtn = document.getElementById('share-report');
         if (shareReportBtn) shareReportBtn.addEventListener('click', handleShareReport);
 
@@ -1440,6 +1464,10 @@
             growth_timeline: `Cronograma realista. Ex: "3 meses: novo site, 6 meses: equipa de vendas, 12 meses: expansão geográfica". Considere recursos disponíveis e prioridades.`,
             success_metrics: `Como vai medir sucesso? Ex: "Receita mensal, NPS dos clientes, Número de leads, Margem de lucro, Produtividade da equipa". Defina metas numéricas específicas.`,
             
+            // Desafios e Expectativas
+            top_challenges: `Liste os principais obstáculos que impedem o crescimento da empresa. Ex: "Concorrência acirrada no mercado digital, Dificuldade para reter talentos qualificados, Fluxo de caixa irregular, Falta de processos padronizados, Baixa conversão de leads em vendas". Seja específico e priorize os 3-5 mais críticos.`,
+            consultancy_expectations: `Descreva claramente o que espera alcançar com esta consultoria. Ex: "Identificar gargalos operacionais e soluções práticas, Desenvolver um plano de crescimento sustentável, Melhorar a eficiência dos processos internos, Estratégias para aumentar a margem de lucro, Roadmap de implementação de tecnologias". Seja específico sobre resultados esperados.`,
+            
             default: `Para este campo, tente fornecer informações claras e concisas. Pense em como isso impacta o seu negócio e os seus objetivos.`
         };
         let suggestion = baseSuggestions[fieldName] || baseSuggestions.default;
@@ -1538,7 +1566,7 @@
         try {
             const webhookData = {
                 user_name: formData.user_name,
-                user_whatsapp: formData.user_whatsapp,
+                user_whatsapp: `+55${formData.user_whatsapp}`, // Adiciona prefixo +55
                 company_name: formData.company_name,
                 sector: formData.sector,
                 company_size: formData.company_size,
@@ -1548,7 +1576,7 @@
                 form_data: formData // Dados completos do formulário
             };
 
-            const response = await fetch('https://webhook.n8n.alifa.com.br/webhook/ia_analizer', {
+            const response = await fetch('https://webhooks.alifa.com.br/webhook/analizer', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1569,6 +1597,121 @@
         }
     }
 
+    // --- Exportação em PDF ---
+    function generatePDFReport() {
+        try {
+            showTemporaryMessage('Gerando relatório PDF...', 'info', 2500);
+
+            const reportScreenElement = document.getElementById('report-screen');
+            if (!reportScreenElement) {
+                showTemporaryMessage('Erro: Elemento principal da tela de relatório (#report-screen) não encontrado.', 'error');
+                console.error('Elemento #report-screen não encontrado para gerar PDF.');
+                return;
+            }
+
+            // Target the actual content container within the report-screen
+            const reportContentElement = reportScreenElement.querySelector('.max-w-6xl.mx-auto');
+            if (!reportContentElement) {
+                showTemporaryMessage('Erro: Conteúdo do relatório (.max-w-6xl.mx-auto) não encontrado.', 'error');
+                console.error('Elemento .max-w-6xl.mx-auto não encontrado dentro de #report-screen para gerar PDF.');
+                return;
+            }
+
+            // Ensure jsPDF is loaded and correctly referenced
+            if (!window.jspdf || typeof window.jspdf.jsPDF !== 'function') {
+                showTemporaryMessage('Erro: Biblioteca jsPDF não carregada ou não configurada corretamente. Tente recarregar a página.', 'error');
+                console.error('jsPDF não está disponível em window.jspdf.jsPDF ou não é uma função.');
+                return;
+            }
+            const { jsPDF } = window.jspdf;
+
+            html2canvas(reportContentElement, {
+                scale: 2, // Aumenta a resolução da imagem
+                useCORS: true, // Permite carregar imagens de outros domínios, se houver
+                logging: false, // Set to true for html2canvas debugging
+                onclone: (documentClone) => {
+                    // Modify the cloned document before rendering to improve PDF output
+                    const clonedContent = documentClone.querySelector('#report-screen .max-w-6xl.mx-auto');
+                    if (clonedContent) {
+                        // Example: Hide elements not desired in PDF, like action buttons, if they were part of the capture
+                        // const buttonsContainer = clonedContent.querySelector('.flex.justify-center.mt-8');
+                        // if (buttonsContainer) {
+                        //     buttonsContainer.style.display = 'none';
+                        // }
+
+                        // Simplify glass containers for potentially better rendering
+                        clonedContent.querySelectorAll('.glass-container').forEach(el => {
+                            el.style.backdropFilter = 'none';
+                            el.style.webkitBackdropFilter = 'none';
+                            el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)'; // A simpler shadow or 'none'
+                            // Ensure background color is solid if transparency causes issues
+                            // const isDark = document.body.classList.contains('dark');
+                            // el.style.backgroundColor = isDark ? '#161b22' : '#f9fafb'; // Example solid colors
+                        });
+
+                        // Make animated titles static for PDF
+                        clonedContent.querySelectorAll('.animated-title-h1, .animated-title-header').forEach(el => {
+                            el.style.backgroundImage = 'none';
+                            el.style.animation = 'none';
+                            el.style.backgroundClip = 'initial';
+                            el.style.webkitBackgroundClip = 'initial';
+                            // Set text color explicitly if gradient is removed
+                            const isDarkOriginal = document.body.classList.contains('dark');
+                            el.style.color = isDarkOriginal ? getComputedStyle(el).getPropertyValue('--dark-text-primary') : getComputedStyle(el).getPropertyValue('--light-text-primary');
+                        });
+                    }
+                }
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const doc = new jsPDF({
+                    orientation: 'p',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+
+                const imgProps = doc.getImageProperties(imgData);
+                const pdfWidth = doc.internal.pageSize.getWidth();
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+                const pageHeight = doc.internal.pageSize.getHeight();
+
+                let currentPosOnImage = 0; // Y-coordinate on the source image (canvas)
+                let remainingImageHeight = pdfHeight;
+
+                // Add the first page
+                doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                remainingImageHeight -= pageHeight;
+
+                // Add subsequent pages if needed
+                while (remainingImageHeight > 0) {
+                    doc.addPage();
+                    currentPosOnImage -= pageHeight; // This is the negative Y offset for the image on the new page
+                    doc.addImage(imgData, 'PNG', 0, currentPosOnImage, pdfWidth, pdfHeight);
+                    remainingImageHeight -= pageHeight;
+                }
+                
+                const companyTitleElement = document.getElementById('company-title-report');
+                let companyNameForFile = 'Empresa';
+                if (companyTitleElement && companyTitleElement.textContent) {
+                     companyNameForFile = companyTitleElement.textContent.replace('Relatório para ', '').trim();
+                }
+
+                const fileName = `diagnostico-empresarial-${companyNameForFile.replace(/[^a-zA-Z0-9_.-]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+                doc.save(fileName);
+                showTemporaryMessage('Relatório PDF baixado com sucesso! 🎉', 'success');
+
+            }).catch(error => {
+                console.error('Erro ao usar html2canvas:', error);
+                showTemporaryMessage('Erro ao gerar imagem do relatório. Verifique o console para detalhes.', 'error');
+            });
+        } catch (error) {
+            console.error('Erro geral ao gerar PDF:', error);
+            showTemporaryMessage('Erro geral ao gerar o relatório PDF. Verifique o console para detalhes.', 'error');
+        }
+    }
+
+
+    
+    
     // --- Mensagens Temporárias ---
     function showTemporaryMessage(message, type = 'info', duration = 3000) {
         const existingMessage = document.querySelector('.temp-message-overlay');
@@ -1595,6 +1738,3 @@
 </script>
 </body>
 </html>
-```
-
-Espero que isto ajude a testar a aplicação diretamente na plataforma! Se encontrar algum problema ou tiver mais alguma questão, diga-
